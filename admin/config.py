@@ -66,6 +66,17 @@ class Settings:
     HOST = os.getenv("ADMIN_HOST", "0.0.0.0")
     PORT = int(os.getenv("ADMIN_PORT", "8790"))
 
+    #: 控制台（/admin、/api/*、/join、/static）是否仅允许本机访问。
+    #:
+    #: 默认开启。ADMIN_HOST=0.0.0.0 时同热点/局域网都能连到端口；
+    #: 若不锁控制台，任何连上热点的人都能打开管理台、导出账号登录态、改配置。
+    #: 业务口 /v1/*（API Key）不受此限制，仍可供热点上的设备调用。
+    #: 设 ADMIN_CONSOLE_LOCAL_ONLY=0 可恢复旧行为（不推荐）。
+    CONSOLE_LOCAL_ONLY = os.getenv("ADMIN_CONSOLE_LOCAL_ONLY", "1") == "1"
+    #: 额外放行的管理台来源 IP（逗号分隔）。默认仅 127.0.0.1 / ::1。
+    #: 反代部署时填反代回环地址；一般用户保持空即可。
+    CONSOLE_ALLOWED_IPS = os.getenv("ADMIN_CONSOLE_ALLOWED_IPS", "").strip()
+
     #: 是否对公网开放 OpenAPI 文档（`/docs`、`/redoc`、`/openapi.json`）
     #: 以及内嵌网关的 `/gw/docs`、`/gw/openapi.json`。
     #:
