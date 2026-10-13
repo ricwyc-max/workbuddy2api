@@ -2120,7 +2120,10 @@ function accRow(a) {
         ${a.post_login_automation ? `<small style="color:var(--fg-muted)" title="${esc((a.post_login_automation.result?.errors || []).join('；'))}">${esc(({queued:'自动任务排队中',running:'自动任务执行中',completed:'自动任务已完成',failed:'部分自动任务未完成'})[a.post_login_automation.status] || '')}</small>` : ''}
       </div>
     </td>
-    <td class="col-status" data-label="状态">${badge(a.status)}${accountLimitBadge(a)}</td>
+    <td class="col-status" data-label="状态">${badge(a.status)}${accountLimitBadge(a)}
+      <button type="button" class="limit-chip" style="margin-left:4px" onclick="editAccInflight(${a.id})"
+        data-tooltip="该账号在途并发上限" data-tooltip-description="空=全局 ADMIN_POOL_MAX_IN_FLIGHT；0=不限；N=最多 N 路在途。与 API Key 并发限制相互独立。"
+        aria-label="在途并发">${a.max_in_flight===0?'并发不限':(a.max_in_flight==null?'并发全局':('并发 '+a.max_in_flight))}</button></td>
     <td class="tnum text-right" data-label="总积分" style="color:var(--fg-muted)">${a.balance_total}</td>
     <td class="tnum text-right font-medium" data-label="剩余" style="color:${a.balance_remain>0?'var(--ok,#059669)':'var(--danger)'}">
       ${a.balance_remain}${soon > 0 ? `<span class="fs-10-5" style="color:var(--warn)"> (${fmtCredit(soon)})</span>` : ""}
@@ -2227,6 +2230,17 @@ async function refreshAcc(id){
   if (r.ok) { loadAccounts(); if (_creditStats) loadCreditStats(); }
 }
 async function toggleAcc(id,st){ await api("/api/accounts/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:st})}); loadAccounts(); }
+async function editAccInflight(id){
+  const a = accById(id);
+  const cur = a && a.max_in_flight != null ? String(a.max_in_flight) : "";
+  const v = prompt("该账号在途并发上限\n（空=跟随全局，0=不限，N=最多 N 路）", cur);
+  if (v === null) return;
+  const body = { max_in_flight: v.trim() === "" ? null : Number(v.trim()) };
+  if (v.trim() !== "" && !Number.isInteger(body.max_in_flight)) { toast("必须是整数", "err"); return; }
+  const r = await api("/api/accounts/"+id, {method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  toast(r.ok ? "已更新在途并发" : "更新失败", r.ok ? "ok" : "err");
+  if (r.ok) loadAccounts();
+}
 async function delAcc(id){ if(!await uiConfirm({message:"确认删除该账号？", title:"删除账号"}))return; const r=await api("/api/accounts/"+id,{method:"DELETE"}); toast(r.ok?"已删除":"删除失败",r.ok?"ok":"err"); if(r.ok) loadAccounts(); }
 async function injectAcc(id){
   if(!await uiConfirm({kind:"warn", danger:false, title:"注入本机客户端",

@@ -135,7 +135,14 @@ class Settings:
     #: 单账号最大在途请求数（0 = 不限）。
     #: 粘性路由与加权选号都会倾向少数账号，叠加长连接后单号容易过载，
     #: 上游按账号限速时会成片 429/5xx；在途上限把并发摊平到整个池子。
-    MAX_IN_FLIGHT = int(os.getenv("ADMIN_POOL_MAX_IN_FLIGHT", "3"))
+    #:
+    #: 2026-10-14 从 3 调到 8：单账号池下 5 路并发会被 3 卡死，
+    #: 第 4+ 路选号为空直接 503「号池里没有可用账号」。8 路可覆盖常见
+    #: 多开场景；仍不够就继续调大，或加号池账号。
+    MAX_IN_FLIGHT = int(os.getenv("ADMIN_POOL_MAX_IN_FLIGHT", "8"))
+    #: 选号时若候选账号全部「在途占满」，最多等待多少秒再失败。
+    #: 0 = 不等待（旧行为）。短暂等待可消化并发尖峰，避免误报 no_account。
+    POOL_BUSY_WAIT_SECONDS = float(os.getenv("ADMIN_POOL_BUSY_WAIT_SECONDS", "3"))
     #: 会话粘性路由开关。开启后同一会话固定同一账号：
     #: 上游前缀缓存不碎、多轮更快更省，且一次会话不在号池里逐轮跳号（拟人）。
     STICKY_ENABLED = os.getenv("ADMIN_SESSION_STICKY", "1") != "0"
