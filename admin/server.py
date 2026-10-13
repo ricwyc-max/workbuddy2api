@@ -14,7 +14,7 @@ from admin.db import SessionLocal, init_db, wait_database_ready
 from admin.models import SystemSetting
 from admin.routers import (accounts, credits, groups,
                            growth, keys, login as login_router, logs, models,
-                           proxy, schedules, stats, sync)
+                           netcfg, proxy, schedules, stats, sync)
 from admin.ratelimit import (clear_failures, get_client_ip, get_trusted_client_ip,
                              is_locked, record_failure)
 from admin.security import (
@@ -198,6 +198,7 @@ app.include_router(groups.router)
 app.include_router(stats.router)
 app.include_router(credits.router)
 app.include_router(growth.router)
+app.include_router(netcfg.router)
 if os.getenv("WORKBUDDY_ANDROID") != "1":
     from admin.routers import app_source, client_profile
     app.include_router(client_profile.router)
