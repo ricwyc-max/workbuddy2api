@@ -1,5 +1,6 @@
 """管理后台 FastAPI 入口：登录、挂载路由、托管前端静态页、启动时建库建表。"""
 import logging
+import mimetypes
 import os
 from pathlib import Path
 
@@ -468,6 +469,42 @@ def join_index():
     return FileResponse(STATIC_DIR / "join.html")
 
 
+def _force_static_mimetypes() -> None:
+    """固定前端静态资源的 MIME 类型，不信任操作系统的映射表。
+
+    为什么必须显式指定：Windows 上 `HKCR\\.js\\Content Type` 一旦被第三方软件
+    写成 `text/plain`（实测本机就是这种状态），Python 的 `mimetypes` 会把
+    `.js` 猜成 `text/plain`；Starlette 的 `FileResponse` 正是用
+    `mimetypes.guess_type()` 决定 Content-Type，于是/index.html 里的
+    `<script src>` 全部以 text/plain 返回。再叠加我们自己发出的
+    `X-Content-Type-Options: nosniff`，浏览器会**直接拒绝执行**这些脚本 ——
+    表现是页面看着正常、但所有交互与动态面板全废：
+
+      * 主题切换按钮点了没反应（theme.js 没执行，WBTheme 未定义）；
+      * 成长计划一片空白（growth_center.js 没执行，WBGrowthCenter 未定义）；
+      * 用量日志/客户端参数的渲染函数不存在或行为异常。
+
+    CSS 不受影响（`.css` 的映射通常是对的），所以「样式在、功能全没了」
+    这种现象特别容易被误判成 CSS 问题，实际是 JS 一个字都没跑。
+    这里在挂载静态目录前把映射钉死，避免再次依赖系统注册表。
+    """
+    overrides = {
+        ".js": "text/javascript",
+        ".mjs": "text/javascript",
+        ".css": "text/css",
+        ".json": "application/json",
+        ".map": "application/json",
+        ".svg": "image/svg+xml",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf",
+        ".ico": "image/x-icon",
+    }
+    for suffix, media_type in overrides.items():
+        mimetypes.add_type(media_type, suffix, strict=True)
+
+
+_force_static_mimetypes()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # 内嵌 converter 网关到 /gw 前缀（单端口部署）。设置脱敏与日志路径以对齐独立运行时的行为。
