@@ -667,20 +667,20 @@
 }
 .acc-exp .acc-exp-note{ font-size:11px; color:var(--fg-subtle); }
 
-    /* ==========================================================================
-       亮底 = 暗字
+        /* ==========================================================================
+       亮底 = 暗字（只覆盖「深色主题下仍然是浅底」的那几类）
        --------------------------------------------------------------------------
-       部分区块写死了浅色底（`bg-slate-50`、`bg-white`、`bg-amber-100`、粉色提示…），
-       而文字颜色走的是主题令牌（`var(--fg)` / `var(--fg-muted)`）。一旦切到深色主题，
-       令牌整体翻成亮色，这些「亮底」上的文字也跟着变亮 —— 亮底亮字，直接看不见。
+       部分区块写死了浅色底（`bg-pink-50`、`bg-indigo-100`、`bg-slate-200`…），
+       而文字走主题令牌（`var(--fg)`）。切到深色主题后令牌翻成亮色，
+       这些仍是浅底的区块就成了亮底亮字。
 
-       注意：console.css 里对 slate/emerald/amber/red 的浅底做了深色主题重映射
-       （浅底 → 深底），所以那几类由它兜底，这里只覆盖「重映射没管到」的底色，
-       以及 `:where()` 优先级为 0，必须由这份优先级更高的规则压住。
-       判定依据是「背景是亮的」而不是「当前主题」，浅色主题下等同无变化。
+       注意与 console.css 的分工：slate/gray/white/emerald/amber/red 的浅底
+       在那边**已被重映射成深底**，因此绝不能在这里再压暗字 ——
+       上一版正是漏了这条约束，造成「暗底 + 暗字」，实测对比度 1.04。
+       这里只列 console.css 没有重映射、深色下依旧浅底的类。
        ========================================================================== */
-    :where(.bg-pink-50,.bg-pink-100,.bg-purple-50,.bg-violet-50,.bg-teal-50,
-      .bg-cyan-50,.bg-lime-50,.bg-slate-200,.bg-gray-200) {
+    :where(.bg-pink-50,.bg-purple-50,.bg-violet-50,.bg-teal-50,.bg-cyan-50,.bg-lime-50,
+      .bg-indigo-100,.bg-blue-100,.bg-slate-200,.bg-gray-200) {
       color:#24282f;
     }
     /* 图表 tooltip（自绘：原生 <title> 延迟长、样式不可控） */
@@ -4181,8 +4181,23 @@ async function loadShareInfo() {
     const port = location.port || (['localhost', '127.0.0.1'].includes(location.hostname) ? network.port : '');
     const suffix = port ? ':' + port : '';
     choices.set('http://127.0.0.1' + suffix, '本机 · 127.0.0.1' + suffix);
-    for (const ip of network.lan_ips || []) choices.set('http://' + ip + suffix, '局域网 · ' + ip + suffix);
-    if (!(network.lan_ips || []).length) status = '未检测到内网 IPv4，请检查 Wi-Fi 或有线网络连接。';
+    /* 监听范围决定「哪些地址真的能连上」：
+     * 设为「仅本机(127.0.0.1)」时，局域网 IP 根本连不通，列出来只会让人复制一个
+     * 连不上的地址去排查半天。这里读同一个事实源（/api/net/config）再决定是否列出，
+     * 而不是无条件把所有网卡地址都摆出来。 */
+    let lanOnly = true;
+    try {
+      const netRes = await api('/api/net/config');
+      if (netRes.ok) {
+        const net = await netRes.json();
+        lanOnly = net.host !== '127.0.0.1';
+        if (!lanOnly) status = '当前服务监听「仅本机」，局域网内的其它设备无法通过下方地址连接；如需共享，请在「设置 → 服务监听地址」改为「局域网」并重启服务。';
+      }
+    } catch (_) { /* 读不到监听配置时不阻断，按可局域网处理 */ }
+    if (lanOnly) {
+      for (const ip of network.lan_ips || []) choices.set('http://' + ip + suffix, '局域网 · ' + ip + suffix);
+      if (!(network.lan_ips || []).length) status = '未检测到内网 IPv4，请检查 Wi-Fi 或有线网络连接。';
+    }
   } catch (_) { status = '内网地址读取失败，可点击刷新重试。'; }
   const picker = $('#shareAddress');
   if (picker) {

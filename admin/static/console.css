@@ -76,11 +76,11 @@ button:focus-visible, summary:focus-visible { outline:2px solid var(--brand-ink)
 .theme-controls button { display:grid; place-items:center; width:32px; height:30px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--fg-muted); cursor:pointer; }
 .theme-controls button[aria-pressed=true] { background:var(--surface); border-color:var(--border); color:var(--brand-ink); }
 .theme-controls button:hover { background:var(--surface-2); }
-/* 以下三块用的是「次级亮面」而非 var(--fg)：主题令牌里 --surface-2 在暗色下是深灰，
- * 但那几处容器写死了浅底，文字若跟令牌走就会亮底亮字。 */
+/* 这几块统一用 --surface-2 作底，文字必须继续跟 --fg 走。
+ * 曾经在这里给深色主题硬编码 color:#24282f，而下面第 100 行又把 bg-slate-50
+ * 映射成 --surface-2（深色下是深灰）—— 结果暗字落暗底，实测对比度 1.04，
+ * 正是「API Keys 还是亮色亮字体看不清」的真正原因。不要再在这里写死颜色。 */
 .api-example { border:1px solid var(--border); background:var(--surface-2); color:var(--fg); }
-:root[data-theme="dark"] :is(.api-example,.api-share-help) { color:#24282f; }
-:root[data-theme="dark"] .api-share-row > code { color:#24282f; }
 .api-share-grid { grid-template-columns:minmax(0,1fr); min-width:0; }
 .api-share-grid > * { min-width:0; }
 .api-example { max-width:100%; }
@@ -105,30 +105,23 @@ button:focus-visible, summary:focus-visible { outline:2px solid var(--brand-ink)
 :root[data-theme="dark"] :is(.bg-amber-50,.bg-orange-50) { background:var(--warn-soft); color:var(--warn); }
 :root[data-theme="dark"] :is(.bg-red-50,.bg-red-100) { background:var(--danger-soft); color:var(--danger); }
 :root[data-theme="dark"] .hover\:bg-slate-50:hover { background:var(--surface-2); }
-/* 亮色底 + 深色字：部分区块写死了浅色底（bg-slate-50/bg-white/bg-emerald-100…），
- * 深色主题下若沿用 var(--fg) 这类令牌，文字会变成亮色而落在亮底上 → 看不清。
- * 这里按「背景是亮的」而不是「当前是什么主题」来判定，统一压成暗色文字，
- * 与主题切换解耦（浅色主题下本来就是暗色字，等于无变化）。 */
-:where(.bg-slate-50,.bg-slate-100,.bg-gray-50,.bg-gray-100,.bg-white,
-  .bg-emerald-50,.bg-emerald-100,.bg-green-50,.bg-green-100,
-  .bg-amber-50,.bg-amber-100,.bg-orange-50,.bg-blue-50,.bg-indigo-50,
-  .bg-sky-50,.bg-red-50,.bg-red-100,.bg-zinc-50,.bg-zinc-100,
-  .bg-blue-100,.bg-indigo-100,.bg-purple-100,.bg-pink-50,.bg-pink-100,.bg-violet-100) {
+/* 亮底上的文字必须压成暗色 —— 但**只对真正是亮底的元素**生效。
+ *
+ * 教训：第一版把 bg-slate-50/bg-emerald-100 等一律当「亮底」，于是和上方
+ * 100~106 行的深色重映射（浅底 → var(--surface-2) 深灰）直接打架：
+ * 底被改深、字仍被强制压暗，实测对比度 1.04（API Keys 的 Base URL 一栏）。
+ * 所以这里必须排除已被重映射成深底的类，让「底变深」和「字变亮」成对出现。
+ *
+ * 保留在清单里的，是深色主题**没有**重映射、仍是浅底的那批。 */
+:is(.api-share-grid,.api-share-card) :is(.text-slate-400,.text-gray-400) { color:var(--fg-muted); }
+:is(.bg-pink-50,.bg-pink-100,.bg-purple-50,.bg-purple-100,.bg-violet-50,.bg-violet-100,
+  .bg-indigo-100,.bg-blue-100,.bg-teal-50,.bg-teal-100,.bg-cyan-50,.bg-cyan-100,
+  .bg-lime-50,.bg-lime-100) {
   color:#24282f;
 }
-:is(.bg-slate-50,.bg-slate-100,.bg-gray-50,.bg-gray-100,.bg-white,
-  .bg-emerald-50,.bg-emerald-100,.bg-green-50,.bg-green-100,
-  .bg-amber-50,.bg-amber-100,.bg-orange-50,.bg-blue-50,.bg-indigo-50,
-  .bg-sky-50,.bg-red-50,.bg-red-100,.bg-zinc-50,.bg-zinc-100,
-  .bg-blue-100,.bg-indigo-100,.bg-purple-100,.bg-pink-50,.bg-pink-100,.bg-violet-100)
-  :is(.text-slate-400,.text-slate-500,.text-gray-400,.text-gray-500) { color:#5c6470; }
-:is(.bg-slate-50,.bg-slate-100,.bg-gray-50,.bg-gray-100,.bg-white,
-  .bg-emerald-50,.bg-emerald-100,.bg-green-50,.bg-green-100,
-  .bg-amber-50,.bg-amber-100,.bg-orange-50,.bg-blue-50,.bg-indigo-50,
-  .bg-sky-50,.bg-red-50,.bg-red-100,.bg-zinc-50,.bg-zinc-100,
-  .bg-blue-100,.bg-indigo-100,.bg-purple-100,.bg-pink-50,.bg-pink-100,.bg-violet-100)
-  :is(.text-slate-600,.text-slate-700,.text-slate-800,.text-gray-600,.text-gray-700,.text-gray-800)
-  { color:#1d2229; }
+:is(.bg-pink-50,.bg-pink-100,.bg-purple-50,.bg-purple-100,.bg-violet-50,.bg-violet-100,
+  .bg-indigo-100,.bg-blue-100,.bg-teal-50,.bg-teal-100,.bg-cyan-50,.bg-cyan-100,
+  .bg-lime-50,.bg-lime-100) :is(.text-slate-400,.text-slate-500,.text-gray-400,.text-gray-500) { color:#5c6470; }
 .model-busy { display:inline-block; font-size:12px; color:var(--fg-muted); }
 .model-busy.idle, .model-busy.normal { color:var(--brand); }
 .model-busy.busy { color:#c08722; }
