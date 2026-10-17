@@ -177,6 +177,16 @@ def _desensitize_chat_body(chat_body: dict) -> dict:
         _logger.info("harness 脱敏 %d -> %d 字节（compact=%s）",
                      raw_len, len(json.dumps(out, ensure_ascii=False)),
                      not settings.ANTHROPIC_NO_COMPACT)
+        tools_out = out.get("tools")
+        if isinstance(tools_out, list):
+            # 描述被抹掉就等于「工具没有说明」：模型只能看到名字和参数，
+            # 无法判断 /goal 该不该调。这条日志用来看清脱敏后的真实留存量。
+            described = [str((t.get("function") or {}).get("name") or t.get("name") or "?")
+                         for t in tools_out
+                         if isinstance(t, dict) and (t.get("function") or t).get("description")]
+            total = len([t for t in tools_out if isinstance(t, dict)])
+            if total:
+                _logger.info("脱敏后工具描述留存 %d/%d | 带描述=%s", len(described), total, described)
         return out
     except Exception as e:
         _logger.warning("harness 脱敏失败，按原样发送：%s", e)
@@ -2930,6 +2940,12 @@ async def responses_proxy(
                             content={"error": {"message": f"请求转换失败：{e}", "type": "invalid_request"}})
 
     chat_body, _stats = project_responses_chat_body(chat_body)
+    _logger.info("responses 投影 mode=%s | tools=%s→%s kept=%s with_desc=%s | slash_contract=%s"
+                 " | dropped_harness=%s | msgs=%s→%s",
+                 _stats.get("mode"), _stats.get("original_tools"), _stats.get("projected_tools"),
+                 _stats.get("kept_tool_names"), _stats.get("tools_with_description"),
+                 _stats.get("slash_contract_extracted"), _stats.get("dropped_harness_messages", 0),
+                 _stats.get("original_messages"), _stats.get("projected_messages"))
     chat_body.setdefault("model", "auto")
     chat_body["stream"] = True
     opts = dict(chat_body.get("stream_options") or {})

@@ -473,20 +473,92 @@ def _compact_harness_message(role: str, content) -> str | None:
     return None
 
 
-def _desensitize_tool_value(value: Any, strip_metadata: bool = False):
-    """递归处理 tool 定义，必要时移除高风险描述字段。"""
+# CLI 控制类工具（/goal、/plan、ToolSearch、内置命令面板等）。这类工具的
+# description 只描述「用户敲了什么时该调用我」，不含业务数据，却是模型判断
+# 触发时机的唯一依据：抽掉描述后模型只看到 create_goal(text:string)，
+# 于是 /goal 永远不会被调用。其余业务工具的描述仍按原策略剥离。
+TOOL_DESC_EXEMPT_NAMES = {
+    "exec_command",
+    "write_stdin",
+    "update_plan",
+    "request_user_input",
+    "view_image",
+    "get_goal",
+    "create_goal",
+    "update_goal",
+    "apply_patch",
+    "tool_search_tool",
+    "todo_write",
+    "exit_plan_mode",
+}
+
+
+# 名称维度兜底：各 CLI 对 goal/todo/plan 类工具的命名不一致
+# （create_goal / clear_goal / goal_update / todo_write ...），
+# 用模式匹配避免每换一版客户端就漏掉一个。
+_TOOL_DESC_EXEMPT_PATTERN = re.compile(r"(?:^|_)(goal|todo|plan)(?:$|_)", re.IGNORECASE)
+
+
+def _is_desc_exempt(tool_name: str) -> bool:
+    if not tool_name:
+        return False
+    return (tool_name in TOOL_DESC_EXEMPT_NAMES
+            or _TOOL_DESC_EXEMPT_PATTERN.search(tool_name) is not None)
+
+
+def _tool_def_name(tool: Any) -> str:
+    """取工具名，兼容 Chat 嵌套格式与 Responses 扁平格式。"""
+    if not isinstance(tool, dict):
+        return ""
+    function = tool.get("function")
+    if isinstance(function, dict):
+        return str(function.get("name", "") or "")
+    return str(tool.get("name", "") or "")
+
+
+def _desensitize_tool_list(tools: Any, strip_metadata: bool = False) -> Any:
+    """按工具名逐条决定是否保留 description。
+
+    只有 TOOL_DESC_EXEMPT_NAMES 里的 CLI 控制类工具保留描述；其余工具
+    保持「strip_metadata=True 即剥离描述」的既有行为，避免放宽审核面。
+    """
+    if not isinstance(tools, list):
+        return tools
+    out: list[Any] = []
+    for tool in tools:
+        keep = _is_desc_exempt(_tool_def_name(tool))
+        out.append(_desensitize_tool_value(tool, strip_metadata=strip_metadata,
+                                           keep_description=keep))
+    return out
+
+
+def _desensitize_tool_value(value: Any, strip_metadata: bool = False,
+                            keep_description: bool = False):
+    """递归处理 tool 定义，必要时移除高风险描述字段。
+
+    keep_description=True 时保留 description（仍做零宽脱敏），用于
+    TOOL_DESC_EXEMPT_NAMES 里的 CLI 控制类工具。
+    """
     if isinstance(value, dict):
         new_value = {}
         for key, item in value.items():
-            if key in ("description", "title") and isinstance(item, str):
-                if strip_metadata:
+            if isinstance(item, str) and key in ("description", "title"):
+                # 豁免名单里的工具保留 description（仍做零宽脱敏），
+                # title 与其余工具在 strip_metadata 下照旧剥离。
+                keep = key == "description" and keep_description
+                if strip_metadata and not keep:
                     continue
                 new_value[key] = desensitize_text(item)
             else:
-                new_value[key] = _desensitize_tool_value(item, strip_metadata=strip_metadata)
+                new_value[key] = _desensitize_tool_value(
+                    item, strip_metadata=strip_metadata, keep_description=keep_description
+                )
         return new_value
     if isinstance(value, list):
-        return [_desensitize_tool_value(item, strip_metadata=strip_metadata) for item in value]
+        return [
+            _desensitize_tool_value(item, strip_metadata=strip_metadata, keep_description=keep_description)
+            for item in value
+        ]
     return value
 
 
@@ -548,7 +620,7 @@ def desensitize_body(body: dict, roles: tuple[str, ...] = ("system",),
         )
         changed = True
     if desensitize_tools and body.get("tools"):
-        nb["tools"] = _desensitize_tool_value(body["tools"], strip_metadata=strip_tool_metadata)
+        nb["tools"] = _desensitize_tool_list(body["tools"], strip_metadata=strip_tool_metadata)
         changed = True
     return nb if changed else body
 

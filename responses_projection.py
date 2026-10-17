@@ -21,6 +21,7 @@ Codex CLI 会把大量运行时提示、完整工具 schema、长历史、以及
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 
@@ -65,7 +66,10 @@ BASE_SYSTEM_PROMPT = (
     "Be precise, concise, safe, and action-oriented. "
     "Use available tools when needed, follow repository instructions and durable user context, "
     "and continue from the preserved recent context. "
-    "If earlier history was condensed, rely on the preserved recent messages and rerun tools when exact old details are required."
+    "If earlier history was condensed, rely on the preserved recent messages and rerun tools when exact old details are required. "
+    "When a user message starts with a slash command (for example /goal, /plan, /todo), "
+    "treat it as an instruction to invoke the matching tool call in this same turn rather than replying with text; "
+    "match the command and its arguments against the available tool descriptions."
 )
 
 HISTORY_PREFIX = "Earlier conversation summary (condensed):"
@@ -75,6 +79,10 @@ MAX_USER_CHARS = 3200
 MAX_ASSISTANT_CHARS = 1800
 MAX_TOOL_OUTPUT_CHARS = 1600
 MAX_TOOL_ARGS_CHARS = 900
+# 工具描述是模型判断「何时调用」的唯一依据（/goal → create_goal 的映射就写在这里），
+# 截断但绝不整条丢弃。
+MAX_TOOL_DESC_CHARS = 240
+MAX_PARAM_DESC_CHARS = 120
 MAX_HISTORY_SUMMARY_CHARS = 2200
 MAX_HISTORY_ITEMS = 10
 MAX_TAIL_MESSAGES = 8
@@ -98,6 +106,8 @@ SCHEMA_KEEP_KEYS = {
     "minLength",
     "maxLength",
     "nullable",
+    # 参数级说明同样参与「该不该调用」的判断，缺失会让模型瞎猜参数语义。
+    "description",
 }
 
 
@@ -119,6 +129,11 @@ def project_responses_chat_body(body: dict) -> tuple[dict, dict]:
         return projected, {
             "mode": "conservative",
             "aggressive": False,
+            "kept_tool_names": _tool_name_list(projected_tools),
+            "tools_with_description": sum(
+                1 for tool in projected_tools if (tool.get("function") or {}).get("description")
+            ),
+            "slash_contract_extracted": False,
             "original_messages": len(messages),
             "projected_messages": len(projected["messages"]),
             "original_message_chars": _messages_size(messages),
@@ -140,6 +155,11 @@ def project_responses_chat_body(body: dict) -> tuple[dict, dict]:
         if role == "system":
             if _looks_like_harness_system(text):
                 dropped_harness_messages += 1
+                # harness 原文必须丢弃，但其中有「slash 命令 → 工具」的约定，
+                # 那是模型判断 /goal 该调哪个工具的唯一线索，抽出来再丢。
+                contract = _extract_slash_tool_contract(text)
+                if contract:
+                    preserved_guidance.append(contract)
                 continue
             guidance = _truncate_text(text, MAX_SYSTEM_GUIDANCE_CHARS)
             if guidance:
@@ -147,7 +167,16 @@ def project_responses_chat_body(body: dict) -> tuple[dict, dict]:
             continue
 
         if role == "user" and _looks_like_harness_user(text):
-            dropped_harness_messages += 1
+            # CLI 极常把 <system-reminder> 追加在用户输入后面。整条丢弃会把
+            # 用户真实指令（例如 "/goal clear"）一起吞掉，所以先剥注入块，
+            # 有残余就当作正常用户消息保留。
+            residual = _strip_harness_blocks(text)
+            if not residual.strip():
+                dropped_harness_messages += 1
+                continue
+            kept = dict(msg)
+            kept["content"] = _truncate_text(residual, MAX_USER_CHARS)
+            conversation.append(kept)
             continue
 
         projected_msg = _project_conversation_message(msg)
@@ -155,7 +184,10 @@ def project_responses_chat_body(body: dict) -> tuple[dict, dict]:
             conversation.append(projected_msg)
 
     if not conversation:
-        conversation = _project_messages_conservative(messages)
+        # 整条请求都是 harness 时，绝不能把刚丢弃的原文整段加回来（会绕过
+        # tail 裁剪并推高审核面）。只保底留下最后一条真实 user 输入。
+        last_user = _last_real_user_message(messages)
+        conversation = [last_user] if last_user is not None else []
 
     tail_start = _choose_tail_start(conversation)
     tail_start = _expand_tail_for_tool_context(conversation, tail_start)
@@ -191,6 +223,13 @@ def project_responses_chat_body(body: dict) -> tuple[dict, dict]:
     return projected, {
         "mode": "aggressive",
         "aggressive": True,
+        "kept_tool_names": _tool_name_list(projected_tools),
+        "tools_with_description": sum(
+            1 for tool in projected_tools if (tool.get("function") or {}).get("description")
+        ),
+        "slash_contract_extracted": any(
+            guidance.startswith("Slash command to tool mapping") for guidance in preserved_guidance
+        ),
         "dropped_harness_messages": dropped_harness_messages,
         "preserved_guidance_messages": len(preserved_guidance),
         "summarized_history_messages": len(omitted),
@@ -360,6 +399,9 @@ def _project_tools(tools: list[dict]) -> tuple[list[dict], dict]:
             continue
 
         projected_function: dict[str, Any] = {"name": name}
+        description = function.get("description")
+        if isinstance(description, str) and description.strip():
+            projected_function["description"] = _truncate_text(description, MAX_TOOL_DESC_CHARS)
         if "parameters" in function:
             projected_function["parameters"] = _project_schema(function.get("parameters"))
         if "strict" in function:
@@ -395,6 +437,8 @@ def _project_schema(schema: Any, depth: int = 0) -> Any:
                 out[key] = [_project_schema(item, depth + 1) for item in value[:6]]
             elif key == "additionalProperties" and isinstance(value, dict):
                 out[key] = _project_schema(value, depth + 1)
+            elif key == "description" and isinstance(value, str):
+                out[key] = _truncate_text(value, MAX_PARAM_DESC_CHARS)
             else:
                 out[key] = value
         return out or {"type": "object"}
@@ -552,12 +596,64 @@ def _merge_guidance_messages(messages: list[str]) -> str:
     return "Additional instructions:\n" + "\n\n".join(merged)
 
 
+_TOOL_LIST_JSON_KEYS = ("matches", "results", "tools", "functions", "items")
+
+
+def _summarize_json_tool_list(text: str) -> str:
+    """ToolSearch 一类的 JSON 工具清单：按元素收敛，绝不截断成非法 JSON。
+
+    行式 head/tail 摘要会把 JSON 从中间切断，模型拿到坏 JSON 也就无法
+    从中选工具；这里改为保留每个命中的 name + 首句 description。
+    """
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    entries = next((parsed[key] for key in _TOOL_LIST_JSON_KEYS
+                    if isinstance(parsed.get(key), list)), None)
+    if not isinstance(entries, list) or not entries:
+        return ""
+
+    lines: list[str] = []
+    kept = 0
+    for entry in entries:
+        if kept >= 8:
+            break
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name") or (entry.get("function") or {}).get("name")
+        if not name:
+            continue
+        desc = entry.get("description") or (entry.get("function") or {}).get("description") or ""
+        first_sentence = str(desc).strip().split(". ")[0]
+        line = f"- {name}"
+        if first_sentence:
+            line += f": {_truncate_text(first_sentence, 140)}"
+        lines.append(line)
+        kept += 1
+
+    if not lines:
+        return ""
+    omitted = max(len(entries) - kept, 0)
+    summary = "Matching tools:\n" + "\n".join(lines)
+    if omitted:
+        summary += f"\n... [{omitted} more tools omitted] ..."
+    return summary
+
+
 def _summarize_tool_output(text: str) -> str:
     text = (text or "").strip()
     if not text:
         return ""
     if len(text) <= MAX_TOOL_OUTPUT_CHARS and text.count("\n") <= 24:
         return text
+
+    if text.startswith("{"):
+        json_summary = _summarize_json_tool_list(text)
+        if json_summary:
+            return _truncate_text(json_summary, MAX_TOOL_OUTPUT_CHARS)
 
     lines = text.splitlines()
     exit_line = next((line.strip() for line in lines if "Process exited with code" in line), "")
@@ -646,6 +742,95 @@ def _content_to_text(content: Any) -> str:
     return str(content)
 
 
+_SLASH_LINE_RE = re.compile(r"^\s*(?:[-*]\s*)?[`\"']*(/[A-Za-z][\w-]*)")
+_TOOL_REF_RE = re.compile(r"\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b")
+
+
+def _extract_slash_tool_contract(text: str) -> str:
+    """从 harness 文本里抽出「slash 命令 ↔ 工具名」的对应关系。
+
+    harness 常写成：
+        - `/goal <text>` → create_goal
+        - Use create_goal when the user runs /goal
+        - `/goal clear` clears the goal (clear_goal)
+    这些行是模型决定「收到 /goal 要不要发 tool_call」的唯一依据，但 harness
+    原文必须整段丢弃，所以只保留映射，不保留模板。
+    """
+    if not text or "/" not in text:
+        return ""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        slash = _SLASH_LINE_RE.search(line)
+        if not slash:
+            continue
+        # 只认「同一行里既出现 slash 命令、又出现 snake_case 工具名」的行
+        tools = [m.group(1) for m in _TOOL_REF_RE.finditer(line)
+                 if m.group(1) not in {"system_reminder", "agents_md"}]
+        if not tools:
+            continue
+        # 保留原行：/goal、/goal clear、/goal update 的差异只在参数上，
+        # 简化成 "命令 -> 工具" 会把三条压成同一个 /goal。
+        entry = line.lstrip("-* ").replace("`", "").strip()
+        if entry in seen:
+            continue
+        seen.add(entry)
+        lines.append(entry)
+        if len(lines) >= 12:
+            break
+    if not lines:
+        return ""
+    return ("Slash command to tool mapping: when the user's message starts with one of "
+            "these commands, invoke the listed tool instead of answering in text.\n"
+            + "\n".join(f"- {entry}" for entry in lines))
+
+
+def _last_real_user_message(messages: list[dict]) -> dict | None:
+    """取最后一条非 harness 的 user 消息（用于 conversation 为空时保底）。"""
+    for msg in reversed(messages):
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        text = _content_to_text(msg.get("content", ""))
+        if not text.strip():
+            continue
+        if _looks_like_harness_user(text):
+            residual = _strip_harness_blocks(text)
+            if not residual:
+                continue
+            out = dict(msg)
+            out["content"] = _truncate_text(residual, MAX_USER_CHARS)
+            return out
+        out = dict(msg)
+        out["content"] = _truncate_text(text, MAX_USER_CHARS)
+        return out
+    return None
+
+
+_HARNESS_TAG_BLOCKS = (
+    ("<environment_context>", "</environment_context>"),
+    ("<permissions instructions>", "</permissions instructions>"),
+    ("<collaboration_mode>", "</collaboration_mode>"),
+    ("<skills_instructions>", "</skills_instructions>"),
+    ("<system-reminder>", "</system-reminder>"),
+)
+
+
+def _strip_harness_blocks(text: str) -> str:
+    """剥掉 user 消息里注入的 harness 块，保留用户真实输入。"""
+    out = text or ""
+    for start_tag, end_tag in _HARNESS_TAG_BLOCKS:
+        pattern = re.compile(
+            r"\s*" + re.escape(start_tag) + r".*?" + re.escape(end_tag) + r"\s*",
+            re.DOTALL,
+        )
+        out = pattern.sub("\n", out)
+        # 未闭合的尾块：从起始标签截到结尾
+        if start_tag in out:
+            out = re.sub(r"\s*" + re.escape(start_tag) + r".*$", "\n", out, flags=re.DOTALL)
+    return out.strip()
+
+
 def _looks_like_harness_user(text: str) -> bool:
     return any(marker in text for marker in HARNESS_USER_MARKERS)
 
@@ -680,6 +865,10 @@ def _tool_name(tool: dict) -> str:
         return ""
     function = tool.get("function") or tool
     return str(function.get("name", "") or "")
+
+
+def _tool_name_list(tools: list[dict]) -> list[str]:
+    return [name for name in (_tool_name(tool) for tool in tools or []) if name]
 
 
 def _tools_size(tools: list[dict]) -> int:

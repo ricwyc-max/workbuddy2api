@@ -106,6 +106,20 @@ def responses_request_to_chat(body: dict) -> dict:
     tools = body.get("tools")
     if tools:
         chat["tools"] = _convert_tools_for_chat(tools)
+        # Responses 内置工具（tool_search / web_search 等）语义与 function 不同构，
+        # 不能硬转成 function 让模型乱猜参数；降级成一条说明，至少不让它无声消失。
+        builtin_types = sorted({
+            str(t.get("type")) for t in tools
+            if isinstance(t, dict) and t.get("type") not in (None, "function")
+        })
+        if builtin_types:
+            chat["messages"].append({
+                "role": "system",
+                "content": ("Client-side built-in tools are available and resolved by the harness: "
+                            + ", ".join(builtin_types)
+                            + ". These are not callable as functions; when a request needs them, "
+                              "state the intent and rely on the provided mappings."),
+            })
     if "tool_choice" in body:
         chat["tool_choice"] = body["tool_choice"]
 

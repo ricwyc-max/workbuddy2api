@@ -1290,7 +1290,7 @@ def _looks_like_content_filter_text(text: str) -> bool:
 def _chat_body_desensitize(body: dict, *, force_compact: bool = False) -> dict:
     if not CONFIG.get("desensitize"):
         return body
-    return desensitize_body(
+    out = desensitize_body(
         body,
         roles=("system", "developer"),
         desensitize_harness_user=True,
@@ -1298,6 +1298,15 @@ def _chat_body_desensitize(body: dict, *, force_compact: bool = False) -> dict:
         compact_harness=(force_compact or not CONFIG.get("no_compact")),
         strip_tool_metadata=True,
     )
+    tools_out = out.get("tools")
+    if isinstance(tools_out, list):
+        described = [str((t.get("function") or {}).get("name") or t.get("name") or "?")
+                     for t in tools_out
+                     if isinstance(t, dict) and (t.get("function") or t).get("description")]
+        total = len([t for t in tools_out if isinstance(t, dict)])
+        if total:
+            _log(f"脱敏后工具描述留存 {len(described)}/{total} | 带描述={described}")
+    return out
 
 
 async def _post_backend_once(url: str, headers: dict, body: dict) -> tuple[int, bytes]:
@@ -1380,6 +1389,9 @@ async def create_response(request: Request,
         f"| chars {projection_stats.get('original_message_chars')}→{projection_stats.get('projected_message_chars')} "
         f"| tools {projection_stats.get('original_tools')}→{projection_stats.get('projected_tools')} "
         f"| tool_chars {projection_stats.get('original_tool_chars')}→{projection_stats.get('projected_tool_chars')} "
+        f"| kept_tools={projection_stats.get('kept_tool_names')} "
+        f"| tools_with_desc={projection_stats.get('tools_with_description')} "
+        f"| slash_contract={projection_stats.get('slash_contract_extracted')} "
         f"| summarized_history={projection_stats.get('summarized_history_messages', 0)} "
         f"| dropped_harness={projection_stats.get('dropped_harness_messages', 0)} "
         f"| anchor_user={projection_stats.get('anchor_user_preserved', False)}"
