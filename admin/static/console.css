@@ -112,18 +112,21 @@ button:focus-visible, summary:focus-visible { outline:2px solid var(--brand-ink)
 :where(.bg-slate-50,.bg-slate-100,.bg-gray-50,.bg-gray-100,.bg-white,
   .bg-emerald-50,.bg-emerald-100,.bg-green-50,.bg-green-100,
   .bg-amber-50,.bg-amber-100,.bg-orange-50,.bg-blue-50,.bg-indigo-50,
-  .bg-sky-50,.bg-red-50,.bg-red-100,.bg-zinc-50,.bg-zinc-100) {
+  .bg-sky-50,.bg-red-50,.bg-red-100,.bg-zinc-50,.bg-zinc-100,
+  .bg-blue-100,.bg-indigo-100,.bg-purple-100,.bg-pink-50,.bg-pink-100,.bg-violet-100) {
   color:#24282f;
 }
 :is(.bg-slate-50,.bg-slate-100,.bg-gray-50,.bg-gray-100,.bg-white,
   .bg-emerald-50,.bg-emerald-100,.bg-green-50,.bg-green-100,
   .bg-amber-50,.bg-amber-100,.bg-orange-50,.bg-blue-50,.bg-indigo-50,
-  .bg-sky-50,.bg-red-50,.bg-red-100,.bg-zinc-50,.bg-zinc-100)
+  .bg-sky-50,.bg-red-50,.bg-red-100,.bg-zinc-50,.bg-zinc-100,
+  .bg-blue-100,.bg-indigo-100,.bg-purple-100,.bg-pink-50,.bg-pink-100,.bg-violet-100)
   :is(.text-slate-400,.text-slate-500,.text-gray-400,.text-gray-500) { color:#5c6470; }
 :is(.bg-slate-50,.bg-slate-100,.bg-gray-50,.bg-gray-100,.bg-white,
   .bg-emerald-50,.bg-emerald-100,.bg-green-50,.bg-green-100,
   .bg-amber-50,.bg-amber-100,.bg-orange-50,.bg-blue-50,.bg-indigo-50,
-  .bg-sky-50,.bg-red-50,.bg-red-100,.bg-zinc-50,.bg-zinc-100)
+  .bg-sky-50,.bg-red-50,.bg-red-100,.bg-zinc-50,.bg-zinc-100,
+  .bg-blue-100,.bg-indigo-100,.bg-purple-100,.bg-pink-50,.bg-pink-100,.bg-violet-100)
   :is(.text-slate-600,.text-slate-700,.text-slate-800,.text-gray-600,.text-gray-700,.text-gray-800)
   { color:#1d2229; }
 .model-busy { display:inline-block; font-size:12px; color:var(--fg-muted); }
