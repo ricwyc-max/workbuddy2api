@@ -10,6 +10,9 @@
 .wb-region-option { width:100%; display:flex; align-items:center; gap:12px; min-height:40px; padding:9px 10px; border:0; border-radius:4px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
 .wb-region-option:hover, .wb-region-option:focus { background:var(--surface-alt, #f3f5f7); }
 .wb-region-option[aria-selected=true] { background:#e8f7f0; color:#137449; }
+/* 选中项写死浅绿底：深色主题下 .wb-region 的 --fg 会翻成亮色，文字继承过来就成了
+ * 亮底亮字，这里固定深色（浅色主题下颜色本来就一样，无副作用）。 */
+:root[data-theme="dark"] .wb-region-option[aria-selected=true] { color:#137449; }
 .wb-region-option strong { width:40px; font-weight:500; font-variant-numeric:tabular-nums; }
 .wb-region-option[aria-selected=true]::after { content:''; margin-left:auto; width:6px; height:10px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(45deg); }
 .field .wb-region { margin-left:-8px; margin-right:10px; padding-right:8px; border-right:1px solid var(--line, #dfe3e8); flex-basis:83px; }
