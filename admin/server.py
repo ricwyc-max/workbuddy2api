@@ -25,6 +25,8 @@ from admin.security import (
 )
 from admin.gateway_limits import GatewayAdmissionMiddleware
 from admin.routers import releases
+from admin.routers import growth_center
+from admin.routers import benefits
 
 logger = logging.getLogger("admin.server")
 
@@ -199,6 +201,8 @@ app.include_router(stats.router)
 app.include_router(credits.router)
 app.include_router(growth.router)
 app.include_router(netcfg.router)
+app.include_router(growth_center.router)
+app.include_router(benefits.router)
 if os.getenv("WORKBUDDY_ANDROID") != "1":
     from admin.routers import app_source, client_profile
     app.include_router(client_profile.router)
