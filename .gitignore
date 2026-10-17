@@ -116,3 +116,6 @@ workbuddy_admin.db-wal
 
 # Local credentials file
 登录密码.txt
+
+# 本机防火墙排查探针（临时诊断用，不入库）
+chk_fw.ps1
