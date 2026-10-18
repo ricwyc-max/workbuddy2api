@@ -168,9 +168,8 @@ app.add_middleware(GatewayAdmissionMiddleware)
 # 控制台仅本机：必须在业务中间件之前就能拒掉远端
 app.add_middleware(ConsoleLocalOnlyMiddleware)
 
-if os.getenv("WORKBUDDY_ANDROID") == "1":
-    from admin.request_metrics import TimingMiddleware
-    app.add_middleware(TimingMiddleware)
+from admin.request_metrics import TimingMiddleware
+app.add_middleware(TimingMiddleware)
 
 
 @app.on_event("startup")
